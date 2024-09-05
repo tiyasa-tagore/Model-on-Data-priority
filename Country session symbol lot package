@@ -1,0 +1,321 @@
+import pandas as pd
+from openpyxl import load_workbook
+from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.styles import Alignment, Font
+
+# Load the provided CSV file
+file_path = r"C:\Users\tiyasa\PycharmProjects\new.csv"
+df = pd.read_csv(file_path)
+
+# Ensure the column names are stripped of any extra spaces
+df.columns = df.columns.str.strip()
+
+# Define the lot ranges
+lot_ranges = [
+    (0.01, 0.1),
+    (0.11, 1.0),
+    (1.1, 3.0),
+    (3.1, 5.0),
+    (5.1, 8.0),
+    (8.1, 10.0),
+    (10.1, 20.0),
+    (20.1, 40.0),
+    (40.1, 80.0),
+    (80.1, 100.0),
+    (100.1, float('inf'))
+]
+
+# Function to calculate the profit and count per lot range
+def analyze_lot_ranges(symbol_data):
+    lot_analysis = []
+    for min_lot, max_lot in lot_ranges:
+        lot_range_df = symbol_data[(symbol_data['FinalLot'] >= min_lot) & (symbol_data['FinalLot'] <= max_lot)]
+        if lot_range_df.empty:
+            continue
+        positive_lot_profit = lot_range_df[lot_range_df['profit'] > 0]['profit'].sum()
+        positive_lot_count = lot_range_df[lot_range_df['profit'] > 0]['profit'].count()
+        negative_lot_profit = lot_range_df[lot_range_df['profit'] <= 0]['profit'].sum()
+        negative_lot_count = lot_range_df[lot_range_df['profit'] <= 0]['profit'].count()
+        net_profit = positive_lot_profit + negative_lot_profit
+
+        lot_analysis.append({
+            'FinalLot_Range': f'{min_lot} - {max_lot if max_lot != float("inf") else "above"}',
+            'L_profit+': positive_lot_profit,
+            'L_count+': positive_lot_count,
+            'L_profit-': negative_lot_profit,
+            'L_count-': negative_lot_count,
+            'L_Net': net_profit
+        })
+    return lot_analysis
+
+# Function to analyze type_account for a given lot range
+def analyze_type_account(lot_data):
+    top_3_type_accounts = lot_data.groupby('type_account').agg(
+        Pa_profit_positive=('profit', lambda x: x[x > 0].sum()),
+        Pa_count_positive=('profit', lambda x: (x > 0).count()),
+        Pa_profit_negative=('profit', lambda x: x[x <= 0].sum()),
+        Pa_count_negative=('profit', lambda x: (x <= 0).count())
+    ).reset_index().sort_values(by='Pa_profit_positive', ascending=False)
+
+    account_analysis = []
+    for _, row in top_3_type_accounts.iterrows():
+        net_profit = row['Pa_profit_positive'] + row['Pa_profit_negative']
+        account_analysis.append({
+            'Type_Account': row['type_account'],
+            'Pa_profit+': row['Pa_profit_positive'],
+            'Pa_count+': row['Pa_count_positive'],
+            'Pa_profit-': row['Pa_profit_negative'],
+            'Pa_count-': row['Pa_count_negative'],
+            'Pa_Net': net_profit
+        })
+    return account_analysis
+
+# Top 10 countries by positive profit
+country_profit_analysis = df.groupby('country_name').agg(
+    Positive_Profit=('profit', lambda x: x[x > 0].sum()),
+    Count_Positive=('profit', lambda x: (x > 0).count()),
+    Negative_Profit=('profit', lambda x: x[x <= 0].sum()),
+    Count_Negative=('profit', lambda x: (x <= 0).count())
+).reset_index()
+
+country_profit_analysis['Net'] = country_profit_analysis['Positive_Profit'] + country_profit_analysis['Negative_Profit']
+top_10_countries = country_profit_analysis.sort_values(by='Net', ascending=False).head(10)
+
+# Filter the DataFrame for top 10 countries
+df_top_10_countries = df[df['country_name'].isin(top_10_countries['country_name'])]
+
+# Initialize lists to hold the final analysis data for each tab
+analysis_data = []
+lot_rate_analysis_data = []
+package_analysis_data = []
+
+# Analyze each country, session, symbol, lot range, and type account
+for _, country_row in top_10_countries.iterrows():
+    country_name = country_row['country_name']
+    analysis_data.append({
+        'Country': country_name,
+        'Positive_Profit': country_row['Positive_Profit'],
+        'Count+': country_row['Count_Positive'],
+        'Negative_Profit': country_row['Negative_Profit'],
+        'Count-': country_row['Count_Negative'],
+        'Net': country_row['Net'],
+        'Session': None,
+        'S_profit+': None,
+        'S_count+': None,
+        'S_profit-': None,
+        'S_count-': None,
+        'S_Net': None,
+        'Symbol': None,
+        'Sy_profit+': None,
+        'Sy_count+': None,
+        'Sy_profit-': None,
+        'Sy_count-': None,
+        'Sy_Net': None,
+        'FinalLot_Range': None,
+        'L_profit+': None,
+        'L_count+': None,
+        'L_profit-': None,
+        'L_count-': None,
+        'L_Net': None,
+        'Type_Account': None,
+        'Pa_profit+': None,
+        'Pa_count+': None,
+        'Pa_profit-': None,
+        'Pa_count-': None,
+        'Pa_Net': None
+    })
+
+    # Analyze top 3 sessions for each country
+    country_data = df_top_10_countries[df_top_10_countries['country_name'] == country_name]
+    session_profit_analysis = country_data.groupby('Session').agg(
+        S_profit_positive=('profit', lambda x: x[x > 0].sum()),
+        S_count_positive=('profit', lambda x: (x > 0).count()),
+        S_profit_negative=('profit', lambda x: x[x <= 0].sum()),
+        S_count_negative=('profit', lambda x: (x <= 0).count())
+    ).reset_index()
+
+    session_profit_analysis['S_Net'] = session_profit_analysis['S_profit_positive'] + session_profit_analysis['S_profit_negative']
+    top_3_sessions = session_profit_analysis.sort_values(by='S_Net', ascending=False).head(3)
+
+    for _, session_row in top_3_sessions.iterrows():
+        session_name = session_row['Session']
+        analysis_data.append({
+            'Country': None,
+            'Positive_Profit': None,
+            'Count+': None,
+            'Negative_Profit': None,
+            'Count-': None,
+            'Net': None,
+            'Session': session_name,
+            'S_profit+': session_row['S_profit_positive'],
+            'S_count+': session_row['S_count_positive'],
+            'S_profit-': session_row['S_profit_negative'],
+            'S_count-': session_row['S_count_negative'],
+            'S_Net': session_row['S_Net'],
+            'Symbol': None,
+            'Sy_profit+': None,
+            'Sy_count+': None,
+            'Sy_profit-': None,
+            'Sy_count-': None,
+            'Sy_Net': None,
+            'FinalLot_Range': None,
+            'L_profit+': None,
+            'L_count+': None,
+            'L_profit-': None,
+            'L_count-': None,
+            'L_Net': None,
+            'Type_Account': None,
+            'Pa_profit+': None,
+            'Pa_count+': None,
+            'Pa_profit-': None,
+            'Pa_count-': None,
+            'Pa_Net': None
+        })
+
+        # Analyze top 3 symbols for each session
+        session_data = country_data[country_data['Session'] == session_name]
+        symbol_profit_analysis = session_data.groupby('symbol').agg(
+            Sy_profit_positive=('profit', lambda x: x[x > 0].sum()),
+            Sy_count_positive=('profit', lambda x: (x > 0).count()),
+            Sy_profit_negative=('profit', lambda x: x[x <= 0].sum()),
+            Sy_count_negative=('profit', lambda x: (x <= 0).count())
+        ).reset_index()
+
+        symbol_profit_analysis['Sy_Net'] = symbol_profit_analysis['Sy_profit_positive'] + symbol_profit_analysis['Sy_profit_negative']
+        top_3_symbols = symbol_profit_analysis.sort_values(by='Sy_Net', ascending=False).head(3)
+
+        for _, symbol_row in top_3_symbols.iterrows():
+            symbol_name = symbol_row['symbol']
+            analysis_data.append({
+                'Country': None,
+                'Positive_Profit': None,
+                'Count+': None,
+                'Negative_Profit': None,
+                'Count-': None,
+                'Net': None,
+                'Session': None,
+                'S_profit+': None,
+                'S_count+': None,
+                'S_profit-': None,
+                'S_count-': None,
+                'S_Net': None,
+                'Symbol': symbol_name,
+                'Sy_profit+': symbol_row['Sy_profit_positive'],
+                'Sy_count+': symbol_row['Sy_count_positive'],
+                'Sy_profit-': symbol_row['Sy_profit_negative'],
+                'Sy_count-': symbol_row['Sy_count_negative'],
+                'Sy_Net': symbol_row['Sy_Net'],
+                'FinalLot_Range': None,
+                'L_profit+': None,
+                'L_count+': None,
+                'L_profit-': None,
+                'L_count-': None,
+                'L_Net': None,
+                'Type_Account': None,
+                'Pa_profit+': None,
+                'Pa_count+': None,
+                'Pa_profit-': None,
+                'Pa_count-': None,
+                'Pa_Net': None
+            })
+
+            # Analyze top 2 or all lot ranges for each symbol
+            lot_analysis = analyze_lot_ranges(session_data[session_data['symbol'] == symbol_name])
+
+            # Top 2 lot ranges for tab 1
+            top_2_lots = sorted(lot_analysis, key=lambda x: x['L_Net'], reverse=True)[:2]
+            for lot in top_2_lots:
+                analysis_data.append({
+                    'Country': None,
+                    'Positive_Profit': None,
+                    'Count+': None,
+                    'Negative_Profit': None,
+                    'Count-': None,
+                    'Net': None,
+                    'Session': None,
+                    'S_profit+': None,
+                    'S_count+': None,
+                    'S_profit-': None,
+                    'S_count-': None,
+                    'S_Net': None,
+                    'Symbol': None,
+                    'Sy_profit+': None,
+                    'Sy_count+': None,
+                    'Sy_profit-': None,
+                    'Sy_count-': None,
+                    'Sy_Net': None,
+                    'FinalLot_Range': lot['FinalLot_Range'],
+                    'L_profit+': lot['L_profit+'],
+                    'L_count+': lot['L_count+'],
+                    'L_profit-': lot['L_profit-'],
+                    'L_count-': lot['L_count-'],
+                    'L_Net': lot['L_Net'],
+                    'Type_Account': None,
+                    'Pa_profit+': None,
+                    'Pa_count+': None,
+                    'Pa_profit-': None,
+                    'Pa_count-': None,
+                    'Pa_Net': None
+                })
+
+            # All lot ranges for tab 2
+            for lot in lot_analysis:
+                lot_rate_analysis_data.append({
+                    'Country': country_name,
+                    'Session': session_name,
+                    'Symbol': symbol_name,
+                    'FinalLot_Range': lot['FinalLot_Range'],
+                    'L_profit+': lot['L_profit+'],
+                    'L_count+': lot['L_count+'],
+                    'L_profit-': lot['L_profit-'],
+                    'L_count-': lot['L_count-'],
+                    'L_Net': lot['L_Net']
+                })
+
+            # Analyze type_account for all lot ranges (only for Tab 3)
+            for lot in lot_analysis:
+                type_account_analysis = analyze_type_account(session_data[(session_data['FinalLot'] >= float(lot['FinalLot_Range'].split(' - ')[0])) &
+                                                                          (session_data['FinalLot'] <= float(lot['FinalLot_Range'].split(' - ')[1].replace('above', 'inf')))])
+
+                for account in type_account_analysis:
+                    package_analysis_data.append({
+                        'Country': country_name,
+                        'Session': session_name,
+                        'Symbol': symbol_name,
+                        'FinalLot_Range': lot['FinalLot_Range'],
+                        'Type_Account': account['Type_Account'],
+                        'Pa_profit+': account['Pa_profit+'],
+                        'Pa_count+': account['Pa_count+'],
+                        'Pa_profit-': account['Pa_profit-'],
+                        'Pa_count-': account['Pa_count-'],
+                        'Pa_Net': account['Pa_Net']
+                    })
+
+# Convert the lists into DataFrames
+df_analysis = pd.DataFrame(analysis_data)
+df_lot_rate_analysis = pd.DataFrame(lot_rate_analysis_data)
+df_package_analysis = pd.DataFrame(package_analysis_data)
+
+# Sorting the package analysis by Pa_Net in descending order
+df_package_analysis = df_package_analysis.sort_values(by='Pa_Net', ascending=False)
+
+# Save to Excel with 3 tabs
+excel_file_path = r"C:\Users\tiyasa\PycharmProjects\analysis_packagewise.xlsx"
+with pd.ExcelWriter(excel_file_path, engine='openpyxl') as writer:
+    # Write each DataFrame to its respective tab
+    df_analysis.to_excel(writer, sheet_name='Analysis', index=False)
+    df_lot_rate_analysis.to_excel(writer, sheet_name='Lot Rate Analysis', index=False)
+    df_package_analysis.to_excel(writer, sheet_name='Package', index=False)
+
+    # Formatting each sheet for better readability
+    workbook = writer.book
+
+    for sheet_name in ['Analysis', 'Lot Rate Analysis', 'Package']:
+        sheet = workbook[sheet_name]
+        for row in sheet.iter_rows():
+            for cell in row:
+                if cell.value is not None:
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                    cell.font = Font(bold=True) if cell.row == 1 else Font()
+
+print(f"Excel saved at {excel_file_path}")
